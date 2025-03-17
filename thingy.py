@@ -5,6 +5,9 @@ import customtkinter as ctk
 import tkinter as tk
 import threading
 from pymem.exception import PymemError
+import psutil
+import ctypes
+
 
 class MemScan:
     def __init__(self, root):
@@ -15,6 +18,7 @@ class MemScan:
         self.pm = None
         self.scanned_addresses = []
         self.is_scanning = False
+        self.is_monitoring = False
         
         self.process_list = tk.Listbox(root, width=80, height=15, font=("Helvetica", 18))
         self.process_list.pack(pady=20)
@@ -24,6 +28,10 @@ class MemScan:
         
         self.scan_value_entry = ctk.CTkEntry(root, placeholder_text="Value to scan", width=400, height=40)
         self.scan_value_entry.pack(pady=15)
+        
+        self.scan_type_combo = ctk.CTkComboBox(root, values=["Integer", "Float", "String"], width=200, height=40)
+        self.scan_type_combo.set("Integer")
+        self.scan_type_combo.pack(pady=15)
         
         self.scan_button = ctk.CTkButton(root, text="Scan", command=self.start_scan_memory, width=200, height=50)
         self.scan_button.pack(pady=15)
@@ -124,6 +132,8 @@ class MemScan:
             self.status_label.configure(text="Scanning...")
             print("Scanning memory...")
 
+            scan_type = self.scan_type_combo.get()
+
             for module in self.pm.list_modules():
                 if not self.is_scanning:
                     break
@@ -187,6 +197,25 @@ class MemScan:
         except Exception as e:
             self.status_label.configure(text=f"Update error: {e}")
             print(f"Update error: {e}")
+
+    def monitor_memory(self):
+        """Optional: Real-time memory monitoring"""
+        if not self.pm or not self.scanned_addresses:
+            return
+
+        self.is_monitoring = True
+        while self.is_monitoring:
+            for addr in self.scanned_addresses:
+                try:
+                    value = self.pm.read_bytes(addr, 4) 
+                    print(f"Memory at {hex(addr)}: {value}")
+                except PymemError:
+                    continue
+
+    def stop_monitoring(self):
+        self.is_monitoring = False
+        self.status_label.configure(text="Monitoring stopped.")
+
 
 if __name__ == "__main__":
     root = ctk.CTk()
