@@ -5,8 +5,6 @@ import customtkinter as ctk
 import tkinter as tk
 import threading
 from pymem.exception import PymemError
-import psutil
-import ctypes
 
 
 class MemScan:
@@ -20,34 +18,48 @@ class MemScan:
         self.is_scanning = False
         self.is_monitoring = False
         
-        self.process_list = tk.Listbox(root, width=80, height=15, font=("Helvetica", 18))
+        self.process_list = tk.Listbox(root, width=80, height=10
+        , font=("Helvetica", 18))
         self.process_list.pack(pady=20)
         
         self.refresh_button = ctk.CTkButton(root, text="Refresh", command=self.refresh_process_list, width=200, height=50)
-        self.refresh_button.pack(pady=15)
+        self.refresh_button.pack(pady=10
+        )
         
         self.scan_value_entry = ctk.CTkEntry(root, placeholder_text="Value to scan", width=400, height=40)
-        self.scan_value_entry.pack(pady=15)
+        self.scan_value_entry.pack(pady=10
+        )
         
         self.scan_type_combo = ctk.CTkComboBox(root, values=["Integer", "Float", "String"], width=200, height=40)
         self.scan_type_combo.set("Integer")
-        self.scan_type_combo.pack(pady=15)
+        self.scan_type_combo.pack(pady=10
+        )
+
+        button_frame = tk.Frame(root, bg=root["bg"])
+        button_frame.pack(pady=10)
+
+        self.scan_button = ctk.CTkButton(button_frame, text="Scan", command=self.start_scan_memory, width=200, height=50)
+        self.scan_button.pack(side=tk.LEFT, padx=5)
+
+        self.next_scan_button = ctk.CTkButton(button_frame, text="Next Scan", command=self.next_scan_memory, width=200, height=50)
+        self.next_scan_button.pack(side=tk.LEFT, padx=5)
         
-        self.scan_button = ctk.CTkButton(root, text="Scan", command=self.start_scan_memory, width=200, height=50)
-        self.scan_button.pack(pady=15)
-        
-        self.results_list = tk.Listbox(root, width=80, height=15, font=("Helvetica", 18))
+        self.results_list = tk.Listbox(root, width=80, height=10
+        , font=("Helvetica", 18))
         self.results_list.pack(pady=20)
         
         self.new_value_entry = ctk.CTkEntry(root, placeholder_text="New Value", width=400, height=40)
-        self.new_value_entry.pack(pady=15)
+        self.new_value_entry.pack(pady=10
+        )
         
         self.update_button = ctk.CTkButton(root, text="Change Value", command=self.update_value, width=200, height=50)
-        self.update_button.pack(pady=15)
+        self.update_button.pack(pady=10
+        )
         
         self.status_label = ctk.CTkLabel(root, text="Ready", font=("Helvetica", 16))
-        self.status_label.pack(pady=15)
-        
+        self.status_label.pack(pady=10
+        )
+
         self.get_process_list()
 
     def get_process_list(self):
@@ -168,6 +180,41 @@ class MemScan:
             self.scan_button.configure(state="normal")
             print("Memory scan completed.")
 
+    def next_scan_memory(self):
+        if not self.scanned_addresses:
+            self.status_label.configure(text="No previous scan data to refine")
+            print("No previous scan data to refine")
+            return
+
+        new_value = self.scan_value_entry.get().strip()
+        if not new_value:
+            self.status_label.configure(text="Please enter a value for next scan")
+            print("Please enter a value for next scan")
+            return
+
+        try:
+            new_value_bytes = new_value.encode('utf-8')
+            new_matches = []
+
+            for addr in self.scanned_addresses:
+                try:
+                    current_value = self.pm.read_bytes(addr, len(new_value_bytes))
+                    if current_value == new_value_bytes:
+                        new_matches.append(addr)
+                except PymemError:
+                    continue
+
+            self.scanned_addresses = new_matches
+            self.results_list.delete(0, tk.END)
+            for addr in self.scanned_addresses:
+                self.results_list.insert(tk.END, f"{hex(addr)} -> {new_value}")
+
+            self.status_label.configure(text=f"Refined scan: {len(self.scanned_addresses)} matches")
+            print(f"Refined scan: {len(self.scanned_addresses)} matches")
+        except Exception as e:
+            self.status_label.configure(text=f"Next scan error: {e}")
+            print(f"Next scan error: {e}")
+
     def update_value(self):
         if not self.pm or not self.scanned_addresses:
             self.status_label.configure(text="Nothing to update")
@@ -199,7 +246,6 @@ class MemScan:
             print(f"Update error: {e}")
 
     def monitor_memory(self):
-        """Optional: Real-time memory monitoring"""
         if not self.pm or not self.scanned_addresses:
             return
 
