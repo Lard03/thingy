@@ -127,13 +127,39 @@ class MemScan:
             value = self.scan_value_entry.get().strip()
             if not value:
                 self.status_label.configure(text="Please enter a value to scan")
+                print("Please enter a value to scan")
                 return
 
-            search_values = [value.encode('utf-8'), value.encode('utf-16le')]
+            scan_type = self.scan_type_combo.get()
+            if scan_type == "Integer":
+                try:
+                    search_value = int(value).to_bytes(4, byteorder='little', signed=True)
+                except ValueError:
+                    self.status_label.configure(text="Invalid integer value")
+                    return
+                search_values = [search_value]
+            elif scan_type == "Float":
+                try:
+                    import struct
+                    search_value = struct.pack('f', float(value))
+                except ValueError:
+                    self.status_label.configure(text="Invalid float value")
+                    return
+                search_values = [search_value]
+            elif scan_type == "String":
+                search_values = [value.encode('utf-8'), value.encode('utf-16le')]
+            else:
+                self.status_label.configure(text="Unsupported scan type")
+                return
+
+            print(f"Search values: {[search_value.hex() for search_value in search_values]}")
 
             self.scanned_addresses.clear()
             self.results_list.delete(0, tk.END)
             self.status_label.configure(text="Scanning...")
+            print("Scanning memory...")
+
+            chunk_size = 1024 * 1024
 
             for module in self.pm.list_modules():
                 if not self.is_scanning:
@@ -141,25 +167,35 @@ class MemScan:
                 try:
                     base = module.lpBaseOfDll
                     size = module.SizeOfImage
-                    memory = self.pm.read_bytes(base, size)
 
-                    for search_value in search_values:
-                        offset = 0
-                        while offset < len(memory) - len(search_value):
-                            if memory[offset:offset+len(search_value)] == search_value:
-                                addr = base + offset
-                                self.scanned_addresses.append(addr)
-                                self.root.after(0, self.results_list.insert, tk.END, f"{hex(addr)} -> {value}")
-                            offset += 1
+                    for offset in range(0, size, chunk_size):
+                        chunk = self.pm.read_bytes(base + offset, min(chunk_size, size - offset))
+
+                        for search_value in search_values:
+                            chunk_offset = 0
+                            while chunk_offset < len(chunk) - len(search_value):
+                                try:
+                                    if chunk[chunk_offset:chunk_offset + len(search_value)] == search_value:
+                                        addr = base + offset + chunk_offset
+                                        self.scanned_addresses.append(addr)
+                                        self.root.after(0, self.results_list.insert, tk.END, f"{hex(addr)} -> {value}")
+                                        print(f"Found value at address: {hex(addr)}")
+                                    chunk_offset += max(1, len(search_value))
+                                except:
+                                    chunk_offset += 1
+                                    continue
                 except PymemError:
                     continue
 
             self.status_label.configure(text=f"Found {len(self.scanned_addresses)} matches")
+            print(f"Found {len(self.scanned_addresses)} matches")
         except Exception as e:
             self.status_label.configure(text=f"Scan error: {e}")
+            print(f"Scan error: {e}")
         finally:
             self.is_scanning = False
             self.scan_button.configure(state="normal")
+            print("Memory scan completed.")
 
     def next_scan_memory(self):
         if not self.scanned_addresses:
