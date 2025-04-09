@@ -41,12 +41,6 @@ class MemScan:
         self.scan_value_entry = ctk.CTkEntry(right_frame, placeholder_text="Value to scan")
         self.scan_value_entry.pack(pady=10, padx=20, fill=tk.X)
         
-        self.scan_type_combo = ctk.CTkComboBox(
-            right_frame, values=["Integer", "Float", "String"], state="readonly"
-        )
-        self.scan_type_combo.set("Integer")
-        self.scan_type_combo.pack(pady=10, padx=20, fill=tk.X)
-        
         button_frame = ctk.CTkFrame(right_frame)
         button_frame.pack(pady=10)
         
@@ -141,25 +135,42 @@ class MemScan:
                 self.status_label.configure(text="Please enter a value to scan")
                 return
 
-            scan_type = self.scan_type_combo.get()
-            if scan_type == "Integer":
-                try:
-                    search_value = int(value).to_bytes(4, byteorder='little', signed=True)
-                except ValueError:
-                    self.status_label.configure(text="Invalid integer value")
-                    return
-                search_values = [search_value]
-            elif scan_type == "Float":
-                try:
-                    search_value = struct.pack('f', float(value))
-                except ValueError:
-                    self.status_label.configure(text="Invalid float value")
-                    return
-                search_values = [search_value]
-            elif scan_type == "String":
-                search_values = [value.encode('utf-8'), value.encode('utf-16le')]
-            else:
-                self.status_label.configure(text="Unsupported scan type")
+            search_values = []
+            try:
+                search_values.append(int(value).to_bytes(4, byteorder='little', signed=True))
+            except ValueError:
+                pass
+
+            try:
+                search_values.append(int(value).to_bytes(4, byteorder='little', signed=False))
+            except ValueError:
+                pass
+
+            try:
+                search_values.append(struct.pack('f', float(value)))
+            except ValueError:
+                pass
+
+            try:
+                search_values.append(struct.pack('d', float(value)))
+            except ValueError:
+                pass
+
+            try:
+                search_values.append(int(value).to_bytes(2, byteorder='little', signed=True))
+            except ValueError:
+                pass
+
+            try:
+                search_values.append(int(value).to_bytes(2, byteorder='little', signed=False))
+            except ValueError:
+                pass
+
+            search_values.append(value.encode('utf-8'))
+            search_values.append(value.encode('utf-16le'))
+
+            if not search_values:
+                self.status_label.configure(text="Unsupported value type")
                 return
 
             self.scanned_addresses.clear()
@@ -185,9 +196,9 @@ class MemScan:
                             while chunk_offset < len(chunk) - len(search_value):
                                 if chunk[chunk_offset:chunk_offset + len(search_value)] == search_value:
                                     addr = base + offset + chunk_offset
-                                    self.scanned_addresses.append(addr)
+                                    self.scanned_addresses.append((addr, search_value))
                                     self.root.after(0, self.results_list.insert, tk.END, f"{hex(addr)} -> {value}")
-                                chunk_offset += max(1, len(search_value))
+                                chunk_offset += 1
 
                         scanned_size += min(chunk_size, size - offset)
                         progress = scanned_size / total_size
@@ -201,7 +212,7 @@ class MemScan:
         finally:
             self.is_scanning = False
             self.scan_button.configure(state="normal")
-            self.root.after(0, self.progress_bar.set, 0)  # Reset progress bar
+            self.root.after(0, self.progress_bar.set, 0)
 
     def get_valid_memory_regions(self):
         regions = []
@@ -212,7 +223,7 @@ class MemScan:
             result = pymem.memory.virtual_query(process_handle, address)
             if result:
                 mbi = result
-                if mbi.State == 0x1000 and mbi.Protect in (0x04, 0x02, 0x20, 0x40):
+                if mbi.State == 0x1000 and (mbi.Protect & 0xF != 0 or mbi.Protect in (0x01, 0x100)):
                     regions.append((mbi.BaseAddress, mbi.RegionSize))
                 address += mbi.RegionSize
             else:
@@ -230,20 +241,19 @@ class MemScan:
             return
 
         try:
-            new_value_bytes = new_value.encode('utf-8')
             new_matches = []
-
-            for addr in self.scanned_addresses:
+            for addr, old_value_bytes in self.scanned_addresses:
                 try:
-                    current_value = self.pm.read_bytes(addr, len(new_value_bytes))
-                    if current_value == new_value_bytes:
-                        new_matches.append(addr)
+                    current_value = self.pm.read_bytes(addr, len(old_value_bytes))
+                    encoded_new_value = self.encode_value(new_value, len(old_value_bytes), old_value_bytes)
+                    if current_value == encoded_new_value:
+                        new_matches.append((addr, old_value_bytes))
                 except PymemError:
                     continue
 
             self.scanned_addresses = new_matches
             self.results_list.delete(0, tk.END)
-            for addr in self.scanned_addresses:
+            for addr, _ in self.scanned_addresses:
                 self.results_list.insert(tk.END, f"{hex(addr)} -> {new_value}")
 
             self.status_label.configure(text=f"Refined scan: {len(self.scanned_addresses)} matches")
@@ -334,11 +344,36 @@ class MemScan:
                     self.status_label.configure(text="Please enter a value to freeze")
                     return
 
-                value_bytes = value.encode('utf-16le')  # Adjust encoding as needed
+                value_bytes = value.encode('utf-16le')
                 self.freeze_value(selected_address, value_bytes)
                 self.status_label.configure(text=f"Freezing value at {hex(selected_address)}")
             except Exception as e:
                 self.status_label.configure(text=f"Freeze error: {e}")
+
+    def encode_value(self, val_str, length, reference_bytes):
+        try:
+            if length == 4:
+                try:
+                    return int(val_str).to_bytes(4, 'little', signed=True)
+                except ValueError:
+                    try:
+                        return struct.pack('f', float(val_str))
+                    except ValueError:
+                        pass
+            elif length == 8:
+                try:
+                    return struct.pack('d', float(val_str))
+                except ValueError:
+                    pass
+            elif length == 2:
+                try:
+                    return int(val_str).to_bytes(2, 'little', signed=True)
+                except ValueError:
+                    pass
+            else:
+                return val_str.encode('utf-8')
+        except Exception:
+            return None
 
 
 if __name__ == "__main__":
