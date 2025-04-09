@@ -6,6 +6,7 @@ import tkinter as tk
 import threading
 from pymem.exception import PymemError
 import struct
+import time
 
 
 class MemScan:
@@ -55,6 +56,9 @@ class MemScan:
         self.next_scan_button = ctk.CTkButton(button_frame, text="Next Scan", command=self.next_scan_memory)
         self.next_scan_button.pack(side=tk.LEFT, padx=5)
         
+        self.pointer_scan_button = ctk.CTkButton(button_frame, text="Pointer Scan", command=lambda: self.find_pointer_to(self.scan_value_entry.get()))
+        self.pointer_scan_button.pack(side=tk.LEFT, padx=5)
+        
         self.results_list = tk.Listbox(right_frame, width=50, height=10, font=("Helvetica", 12))
         self.results_list.pack(pady=10, padx=20, fill=tk.BOTH, expand=True)
         
@@ -63,6 +67,9 @@ class MemScan:
         
         self.update_button = ctk.CTkButton(right_frame, text="Change Value", command=self.update_value)
         self.update_button.pack(pady=10)
+        
+        self.freeze_button = ctk.CTkButton(right_frame, text="Freeze Value", command=self.toggle_freeze)
+        self.freeze_button.pack(pady=10)
         
         self.status_label = ctk.CTkLabel(right_frame, text="Ready")
         self.status_label.pack(pady=10)
@@ -126,91 +133,91 @@ class MemScan:
         threading.Thread(target=self.scan_memory, daemon=True).start()
 
     def scan_memory(self):
-        print("[DEBUG] Starting memory scan...")
         self.is_scanning = True
         self.scan_button.configure(state="disabled")
         try:
             value = self.scan_value_entry.get().strip()
-            print(f"[DEBUG] Value to scan: {value}")
             if not value:
                 self.status_label.configure(text="Please enter a value to scan")
-                print("[DEBUG] No value entered for scanning.")
                 return
 
             scan_type = self.scan_type_combo.get()
-            print(f"[DEBUG] Scan type selected: {scan_type}")
             if scan_type == "Integer":
                 try:
                     search_value = int(value).to_bytes(4, byteorder='little', signed=True)
-                    print(f"[DEBUG] Integer value converted to bytes: {search_value}")
                 except ValueError:
                     self.status_label.configure(text="Invalid integer value")
-                    print("[ERROR] Invalid integer value entered.")
                     return
                 search_values = [search_value]
             elif scan_type == "Float":
                 try:
                     search_value = struct.pack('f', float(value))
-                    print(f"[DEBUG] Float value converted to bytes: {search_value}")
                 except ValueError:
                     self.status_label.configure(text="Invalid float value")
-                    print("[ERROR] Invalid float value entered.")
                     return
                 search_values = [search_value]
             elif scan_type == "String":
                 search_values = [value.encode('utf-8'), value.encode('utf-16le')]
-                print(f"[DEBUG] String value converted to bytes: {search_values}")
             else:
                 self.status_label.configure(text="Unsupported scan type")
-                print("[ERROR] Unsupported scan type selected.")
                 return
 
             self.scanned_addresses.clear()
             self.results_list.delete(0, tk.END)
             self.status_label.configure(text="Scanning...")
-            print("[DEBUG] Cleared previous scan results.")
 
-            total_size = sum(module.SizeOfImage for module in self.pm.list_modules())
-            print(f"[DEBUG] Total memory size to scan: {total_size}")
+            chunk_size = 1024 * 1024
+            memory_regions = self.get_valid_memory_regions()
+            total_size = sum(region[1] for region in memory_regions)
             scanned_size = 0
 
-            for module in self.pm.list_modules():
+            for base, size in memory_regions:
                 if not self.is_scanning:
-                    print("[DEBUG] Scan interrupted by user.")
                     break
                 try:
-                    base = module.lpBaseOfDll
-                    size = module.SizeOfImage
-                    memory = self.pm.read_bytes(base, size)
+                    for offset in range(0, size, chunk_size):
+                        if not self.is_scanning:
+                            break
+                        chunk = self.pm.read_bytes(base + offset, min(chunk_size, size - offset))
 
-                    for search_value in search_values:
-                        offset = 0
-                        while offset < len(memory) - len(search_value):
-                            if memory[offset:offset + len(search_value)] == search_value:
-                                addr = base + offset
-                                self.scanned_addresses.append(addr)
-                                print(f"[DEBUG] Match found at address: {hex(addr)}")
-                                self.root.after(0, self.results_list.insert, tk.END, f"{hex(addr)} -> {value}")
-                            offset += 1
+                        for search_value in search_values:
+                            chunk_offset = 0
+                            while chunk_offset < len(chunk) - len(search_value):
+                                if chunk[chunk_offset:chunk_offset + len(search_value)] == search_value:
+                                    addr = base + offset + chunk_offset
+                                    self.scanned_addresses.append(addr)
+                                    self.root.after(0, self.results_list.insert, tk.END, f"{hex(addr)} -> {value}")
+                                chunk_offset += max(1, len(search_value))
 
-                    scanned_size += size
-                    progress = scanned_size / total_size
-                    self.root.after(0, self.progress_bar.set, progress)
-                    print(f"[DEBUG] Progress: {progress * 100:.2f}%")
-                except PymemError as e:
-                    print(f"[ERROR] Error reading module memory: {e}")
+                        scanned_size += min(chunk_size, size - offset)
+                        progress = scanned_size / total_size
+                        self.root.after(0, self.progress_bar.set, progress)
+                except PymemError:
                     continue
 
             self.status_label.configure(text=f"Found {len(self.scanned_addresses)} matches")
-            print(f"[DEBUG] Scan complete. Matches found: {len(self.scanned_addresses)}")
         except Exception as e:
             self.status_label.configure(text=f"Scan error: {e}")
-            print(f"[ERROR] Scan error: {e}")
         finally:
             self.is_scanning = False
             self.scan_button.configure(state="normal")
-            self.root.after(0, self.progress_bar.set, 0)
-            print("[DEBUG] Scan finished. UI reset.")
+            self.root.after(0, self.progress_bar.set, 0)  # Reset progress bar
+
+    def get_valid_memory_regions(self):
+        regions = []
+        process_handle = self.pm.process_handle
+        address = 0
+        while address < 0x7FFFFFFF:
+            mbi = pymem.ressources.structure.MEMORY_BASIC_INFORMATION()
+            result = pymem.memory.virtual_query(process_handle, address)
+            if result:
+                mbi = result
+                if mbi.State == 0x1000 and mbi.Protect in (0x04, 0x02, 0x20, 0x40):
+                    regions.append((mbi.BaseAddress, mbi.RegionSize))
+                address += mbi.RegionSize
+            else:
+                address += 0x1000
+        return regions
 
     def next_scan_memory(self):
         if not self.scanned_addresses:
@@ -244,61 +251,94 @@ class MemScan:
             self.status_label.configure(text=f"Next scan error: {e}")
 
     def update_value(self):
-        print("[DEBUG] Starting value update...")
         if not self.pm or not self.scanned_addresses:
             self.status_label.configure(text="Nothing to update")
-            print("[DEBUG] No process attached or no scanned addresses.")
             return
-
+        
         new_value = self.new_value_entry.get().strip()
-        print(f"[DEBUG] New value to write: {new_value}")
         if not new_value:
             self.status_label.configure(text="Please enter a new value")
-            print("[DEBUG] No new value entered.")
             return
 
-        scan_type = self.scan_type_combo.get()
-        print(f"[DEBUG] Scan type for update: {scan_type}")
         try:
-            if scan_type == "Integer":
-                try:
-                    write_value = int(new_value).to_bytes(4, byteorder='little', signed=True)
-                    print(f"[DEBUG] Integer value converted to bytes: {write_value}")
-                except ValueError:
-                    self.status_label.configure(text="Invalid integer value")
-                    print("[ERROR] Invalid integer value entered.")
-                    return
-            elif scan_type == "Float":
-                try:
-                    write_value = struct.pack('f', float(new_value))
-                    print(f"[DEBUG] Float value converted to bytes: {write_value}")
-                except ValueError:
-                    self.status_label.configure(text="Invalid float value")
-                    print("[ERROR] Invalid float value entered.")
-                    return
-            elif scan_type == "String":
-                write_value = new_value.encode('utf-8')
-                print(f"[DEBUG] String value converted to bytes: {write_value}")
-            else:
-                self.status_label.configure(text="Unsupported data type")
-                print("[ERROR] Unsupported data type selected.")
-                return
+            write_value = new_value.encode('utf-16le')
 
             success_count = 0
             for addr in self.scanned_addresses:
                 try:
                     self.pm.write_bytes(addr, write_value, len(write_value))
                     success_count += 1
-                    print(f"[DEBUG] Successfully wrote to address: {hex(addr)}")
-                except PymemError as e:
-                    print(f"[ERROR] Failed to write to address {hex(addr)}: {e}")
+                except PymemError:
                     continue
-
+                
             self.status_label.configure(text=f"Updated {success_count} addresses")
-            print(f"[DEBUG] Successfully updated {success_count} addresses.")
         except Exception as e:
-            print(f"[ERROR] Update error: {e}")
             self.status_label.configure(text=f"Update error: {e}")
+
+    def find_pointer_to(self, target_address):
+        if not self.pm:
+            self.status_label.configure(text="Please attach to a process first")
+            return
+
+        try:
+            target_address = int(target_address, 16)
+        except ValueError:
+            self.status_label.configure(text="Invalid target address")
+            return
+
+        self.results_list.delete(0, tk.END)
+        self.status_label.configure(text="Scanning for pointers...")
+        regions = self.get_valid_memory_regions()
+
+        for base, size in regions:
+            try:
+                chunk = self.pm.read_bytes(base, size)
+                for i in range(0, size - 4, 4):
+                    val = struct.unpack("I", chunk[i:i + 4])[0]
+                    if val == target_address:
+                        self.results_list.insert(tk.END, f"Pointer -> {hex(base + i)}")
+            except PymemError:
+                continue
+
+        self.status_label.configure(text="Pointer scan complete")
+
+    def freeze_value(self, address, value_bytes):
+        def freeze_loop():
+            while self.is_monitoring:
+                try:
+                    self.pm.write_bytes(address, value_bytes, len(value_bytes))
+                except:
+                    break
+                time.sleep(0.1)
+        self.is_monitoring = True
+        threading.Thread(target=freeze_loop, daemon=True).start()
+
+    def toggle_freeze(self):
+        if not self.pm or not self.scanned_addresses:
+            self.status_label.configure(text="No value selected to freeze")
+            return
+
+        if self.is_monitoring:
+            self.is_monitoring = False
+            self.status_label.configure(text="Freezing stopped")
+        else:
+            selected = self.results_list.curselection()
+            if not selected:
+                self.status_label.configure(text="Please select a value to freeze")
+                return
+
+            try:
+                selected_address = self.scanned_addresses[selected[0]]
+                value = self.new_value_entry.get().strip()
+                if not value:
+                    self.status_label.configure(text="Please enter a value to freeze")
+                    return
+
+                value_bytes = value.encode('utf-16le')  # Adjust encoding as needed
+                self.freeze_value(selected_address, value_bytes)
+                self.status_label.configure(text=f"Freezing value at {hex(selected_address)}")
+            except Exception as e:
+                self.status_label.configure(text=f"Freeze error: {e}")
 
 
 if __name__ == "__main__":
