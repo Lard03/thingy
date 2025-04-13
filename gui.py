@@ -55,19 +55,22 @@ class MemScanUI:
         self.pointer_scan_button = ctk.CTkButton(button_frame, text="Pointer Scan", command=self.pointer_scan)
         self.pointer_scan_button.pack(side=tk.LEFT, padx=5)
 
-        # Results section
         ctk.CTkLabel(control_frame, text="Scan Results").pack(pady=5)
         results_frame = ctk.CTkFrame(control_frame)
         results_frame.pack(pady=5, padx=20, fill=tk.BOTH, expand=True)
 
-        self.results_list = tk.Listbox(results_frame, font=("Helvetica", 12))
+        self.results_list = tk.Listbox(results_frame, font=("Helvetica", 12), selectmode=tk.SINGLE)
         self.results_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         scrollbar = Scrollbar(results_frame, command=self.results_list.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.results_list.config(yscrollcommand=scrollbar.set)
 
-        # Value modification
+        self.context_menu = tk.Menu(self.results_list, tearoff=0)
+        self.context_menu.add_command(label="Freeze/Unfreeze", command=self.toggle_freeze_from_context)
+
+        self.results_list.bind("<Button-3>", self.show_context_menu)
+
         self.new_value_entry = ctk.CTkEntry(control_frame, placeholder_text="New Value")
         self.new_value_entry.pack(pady=10, padx=20, fill=tk.X)
 
@@ -77,7 +80,6 @@ class MemScanUI:
         self.freeze_button = ctk.CTkButton(control_frame, text="Freeze Value", command=self.toggle_freeze)
         self.freeze_button.pack(pady=5)
 
-        # Status & progress
         self.status_label = ctk.CTkLabel(control_frame, text="Ready")
         self.status_label.pack(pady=10)
 
@@ -133,16 +135,53 @@ class MemScanUI:
         index = selected[0]
         if index in self.scanner.frozen_indices:
             self.scanner.unfreeze_address(index)
+            self.tag_unfreeze(index)
         else:
             self.scanner.freeze_address(index)
+            self.tag_freeze(index)
+
+    def show_context_menu(self, event):
+        try:
+            self.context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.context_menu.grab_release()
+
+    def toggle_freeze_from_context(self):
+        selected = self.results_list.curselection()
+        if not selected:
+            self.update_status("Please select a value to freeze/unfreeze")
+            return
+        index = selected[0]
+        if index in self.scanner.frozen_indices:
+            self.scanner.unfreeze_address(index)
+            self.tag_unfreeze(index)
+        else:
+            self.scanner.freeze_address(index)
+            self.tag_freeze(index)
+
+    def tag_freeze(self, index):
+        value = self.results_list.get(index)
+        self.results_list.delete(index)
+        self.results_list.insert(index, f"[Frozen] {value}")
+        self.results_list.itemconfig(index, {'fg': 'blue'})
+
+    def tag_unfreeze(self, index):
+        value = self.results_list.get(index).replace("[Frozen] ", "")
+        self.results_list.delete(index)
+        self.results_list.insert(index, value)
+        self.results_list.itemconfig(index, {'fg': 'black'})
 
     def update_status(self, message):
         self.status_label.configure(text=message)
 
     def update_results(self, results):
         self.results_list.delete(0, tk.END)
-        for result in results:
-            self.results_list.insert(tk.END, result)
+        for i, result in enumerate(results):
+            if i in self.scanner.frozen_indices:
+                self.results_list.insert(tk.END, f"[Frozen] {result}")
+                self.results_list.itemconfig(tk.END, {'fg': 'blue'})
+            else:
+                self.results_list.insert(tk.END, result)
 
     def update_progress(self, progress):
         self.progress_bar.set(progress)

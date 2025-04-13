@@ -91,7 +91,6 @@ class MemoryScanner:
                 except PymemError:
                     continue
 
-            # Add all at once and sort after
             self.scanned_addresses = sorted(matches, key=lambda a: a.address)
             result_strings = [f"{hex(addr_obj.address)} -> {value}" for addr_obj in self.scanned_addresses]
             self.update_results(result_strings)
@@ -193,11 +192,12 @@ class MemoryScanner:
             results = []
             for idx, addr_obj in enumerate(self.scanned_addresses):
                 try:
-                    if idx not in self.frozen_indices:
+                    if idx in self.frozen_indices:
+
+                        self.pm.write_bytes(addr_obj.address, addr_obj.value, len(addr_obj.value))
+                    else:
                         new_value = self.pm.read_bytes(addr_obj.address, len(addr_obj.value))
                         addr_obj.value = new_value
-                    else:
-                        self.pm.write_bytes(addr_obj.address, addr_obj.value, len(addr_obj.value))
                     results.append(f"{hex(addr_obj.address)} -> {addr_obj.value}")
                 except PymemError:
                     continue
