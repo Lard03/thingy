@@ -13,8 +13,14 @@ class MemScanUI:
         self.root.configure(bg="#1e1e2e")
 
         ctk.set_appearance_mode("dark")
+        self.current_mode = "dark"
 
         self.scanner = MemoryScanner(self.update_status, self.update_results, self.update_progress)
+
+        self.mode_menu = tk.Menu(self.root, tearoff=0)
+        self.mode_menu.add_command(label="Toggle Light/Dark Mode", command=self.toggle_mode)
+        
+        self.root.bind("<Button-3>", self.show_mode_menu)
 
         main_frame = ctk.CTkFrame(self.root)
         main_frame.pack(padx=20, pady=20, fill=tk.BOTH, expand=True)
@@ -33,15 +39,19 @@ class MemScanUI:
         control_frame = ctk.CTkFrame(main_frame)
         control_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10)
 
-        self.scan_value_entry = ctk.CTkEntry(control_frame, placeholder_text="Value to scan")
-        self.scan_value_entry.pack(pady=10, padx=20, fill=tk.X)
+        input_frame = ctk.CTkFrame(control_frame)
+        input_frame.pack(pady=10, padx=20, fill=tk.X)
+
+        self.scan_value_entry = ctk.CTkEntry(input_frame, placeholder_text="Value to scan")
+        self.scan_value_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
 
         self.value_type_var = tk.StringVar(value=Type.Int32.value)
         self.value_type_dropdown = ctk.CTkOptionMenu(
-            control_frame, variable=self.value_type_var,
-            values=[t.value for t in Type]
+            input_frame, variable=self.value_type_var,
+            values=[t.value for t in Type],
+            width=100
         )
-        self.value_type_dropdown.pack(pady=5)
+        self.value_type_dropdown.pack(side=tk.RIGHT)
 
         button_frame = ctk.CTkFrame(control_frame)
         button_frame.pack(pady=5)
@@ -52,8 +62,6 @@ class MemScanUI:
         self.next_scan_button = ctk.CTkButton(button_frame, text="Next Scan", command=self.next_scan_memory)
         self.next_scan_button.pack(side=tk.LEFT, padx=5)
 
-        self.pointer_scan_button = ctk.CTkButton(button_frame, text="Pointer Scan", command=self.pointer_scan)
-        self.pointer_scan_button.pack(side=tk.LEFT, padx=5)
 
         ctk.CTkLabel(control_frame, text="Scan Results").pack(pady=5)
         results_frame = ctk.CTkFrame(control_frame)
@@ -74,11 +82,14 @@ class MemScanUI:
         self.new_value_entry = ctk.CTkEntry(control_frame, placeholder_text="New Value")
         self.new_value_entry.pack(pady=10, padx=20, fill=tk.X)
 
-        self.update_button = ctk.CTkButton(control_frame, text="Change Value", command=self.update_value)
-        self.update_button.pack(pady=5)
+        value_buttons_frame = ctk.CTkFrame(control_frame)
+        value_buttons_frame.pack(pady=5)
 
-        self.freeze_button = ctk.CTkButton(control_frame, text="Freeze Value", command=self.toggle_freeze)
-        self.freeze_button.pack(pady=5)
+        self.update_button = ctk.CTkButton(value_buttons_frame, text="Change Value", command=self.update_value)
+        self.update_button.pack(side=tk.LEFT, padx=5)
+
+        self.freeze_button = ctk.CTkButton(value_buttons_frame, text="Freeze Value", command=self.toggle_freeze)
+        self.freeze_button.pack(side=tk.LEFT, padx=5)
 
         self.status_label = ctk.CTkLabel(control_frame, text="Ready")
         self.status_label.pack(pady=10)
@@ -111,10 +122,6 @@ class MemScanUI:
         value = self.scan_value_entry.get().strip()
         value_type = Type(self.value_type_var.get())
         self.scanner.next_scan_memory(value, value_type)
-
-    def pointer_scan(self):
-        address = self.scan_value_entry.get().strip()
-        self.update_status(f"Pointer scan not implemented yet for {address}") 
 
     def update_value(self):
         new_value = self.new_value_entry.get().strip()
@@ -185,6 +192,22 @@ class MemScanUI:
 
     def update_progress(self, progress):
         self.progress_bar.set(progress)
+
+    def show_mode_menu(self, event):
+        """Show the right-click menu for toggling light/dark mode."""
+        try:
+            self.mode_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.mode_menu.grab_release()
+
+    def toggle_mode(self):
+        """Toggle between light and dark modes."""
+        if self.current_mode == "dark":
+            ctk.set_appearance_mode("light")
+            self.current_mode = "light"
+        else:
+            ctk.set_appearance_mode("dark")
+            self.current_mode = "dark"
 
 
 if __name__ == "__main__":
