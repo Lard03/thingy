@@ -134,6 +134,8 @@ class MemoryScanner:
         if 0 <= index < len(self.scanned_addresses):
             self.frozen_indices.add(index)
             self.update_status(f"Address {hex(self.scanned_addresses[index].address)} frozen")
+            if not self.is_monitoring:
+                self.start_monitoring()
         else:
             self.update_status("Invalid index for freezing.")
 
@@ -202,5 +204,4 @@ class MemoryScanner:
                 except PymemError:
                     continue
             self.update_results(results)
-            time.sleep(0.5)
-
+            time.sleep(0.01)

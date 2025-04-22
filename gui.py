@@ -15,11 +15,18 @@ class MemScanUI:
         ctk.set_appearance_mode("dark")
         self.current_mode = "dark"
 
-        self.scanner = MemoryScanner(self.update_status, self.update_results, self.update_progress)
+        def safe_callback(func):
+            return lambda *args, **kwargs: self.root.after(0, func, *args, **kwargs)
+
+        self.scanner = MemoryScanner(
+            safe_callback(self.update_status),
+            safe_callback(self.update_results),
+            safe_callback(self.update_progress)
+        )
 
         self.mode_menu = tk.Menu(self.root, tearoff=0)
         self.mode_menu.add_command(label="Toggle Light/Dark Mode", command=self.toggle_mode)
-        
+
         self.root.bind("<Button-3>", self.show_mode_menu)
 
         main_frame = ctk.CTkFrame(self.root)
@@ -62,7 +69,6 @@ class MemScanUI:
         self.next_scan_button = ctk.CTkButton(button_frame, text="Next Scan", command=self.next_scan_memory)
         self.next_scan_button.pack(side=tk.LEFT, padx=5)
 
-
         ctk.CTkLabel(control_frame, text="Scan Results").pack(pady=5)
         results_frame = ctk.CTkFrame(control_frame)
         results_frame.pack(pady=5, padx=20, fill=tk.BOTH, expand=True)
@@ -79,17 +85,14 @@ class MemScanUI:
 
         self.results_list.bind("<Button-3>", self.show_context_menu)
 
-        self.new_value_entry = ctk.CTkEntry(control_frame, placeholder_text="New Value")
-        self.new_value_entry.pack(pady=10, padx=20, fill=tk.X)
+        new_value_frame = ctk.CTkFrame(control_frame)
+        new_value_frame.pack(pady=10, padx=20, fill=tk.X)
 
-        value_buttons_frame = ctk.CTkFrame(control_frame)
-        value_buttons_frame.pack(pady=5)
+        self.new_value_entry = ctk.CTkEntry(new_value_frame, placeholder_text="New Value")
+        self.new_value_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
 
-        self.update_button = ctk.CTkButton(value_buttons_frame, text="Change Value", command=self.update_value)
-        self.update_button.pack(side=tk.LEFT, padx=5)
-
-        self.freeze_button = ctk.CTkButton(value_buttons_frame, text="Freeze Value", command=self.toggle_freeze)
-        self.freeze_button.pack(side=tk.LEFT, padx=5)
+        self.update_button = ctk.CTkButton(new_value_frame, text="Change Value", command=self.update_value)
+        self.update_button.pack(side=tk.RIGHT)
 
         self.status_label = ctk.CTkLabel(control_frame, text="Ready")
         self.status_label.pack(pady=10)
@@ -112,14 +115,22 @@ class MemScanUI:
         selected = self.process_list.get(self.process_list.curselection()[0])
         pid = int(selected.split("(PID: ")[1][:-1])
         self.scanner.attach_to_process(pid)
+        self.scan_value_entry.delete(0, tk.END)
+        self.update_status("Attached to process. Ready to scan.")
 
     def start_scan_memory(self):
         value = self.scan_value_entry.get().strip()
+        if not value:
+            self.update_status("Please enter a value to scan")
+            return
         value_type = Type(self.value_type_var.get())
         self.scanner.start_scan_memory(value, value_type)
 
     def next_scan_memory(self):
         value = self.scan_value_entry.get().strip()
+        if not value:
+            self.update_status("Please enter a value to refine scan")
+            return
         value_type = Type(self.value_type_var.get())
         self.scanner.next_scan_memory(value, value_type)
 
@@ -133,6 +144,19 @@ class MemScanUI:
         index = selected[0]
         value_type = Type(self.value_type_var.get())
         self.scanner.edit_address(index, new_value, value_type)
+        current_item = self.results_list.get(index)
+        address = current_item.split(" -> ")[0]
+
+        if "[Frozen]" in current_item:
+            updated_item = f"{address} -> [Frozen] {new_value}"
+        else:
+            updated_item = f"{address} -> {new_value}"
+
+        self.results_list.delete(index)
+        self.results_list.insert(index, updated_item)
+        self.results_list.itemconfig(index, {'fg': 'green'})
+        self.new_value_entry.delete(0, tk.END)
+        self.update_status("Value updated successfully")
 
     def toggle_freeze(self):
         selected = self.results_list.curselection()
@@ -182,6 +206,7 @@ class MemScanUI:
         self.status_label.configure(text=message)
 
     def update_results(self, results):
+        yview = self.results_list.yview()
         self.results_list.delete(0, tk.END)
         for i, result in enumerate(results):
             if i in self.scanner.frozen_indices:
@@ -189,19 +214,18 @@ class MemScanUI:
                 self.results_list.itemconfig(tk.END, {'fg': 'blue'})
             else:
                 self.results_list.insert(tk.END, result)
+        self.results_list.yview_moveto(yview[0])
 
     def update_progress(self, progress):
         self.progress_bar.set(progress)
 
     def show_mode_menu(self, event):
-        """Show the right-click menu for toggling light/dark mode."""
         try:
             self.mode_menu.tk_popup(event.x_root, event.y_root)
         finally:
             self.mode_menu.grab_release()
 
     def toggle_mode(self):
-        """Toggle between light and dark modes."""
         if self.current_mode == "dark":
             ctk.set_appearance_mode("light")
             self.current_mode = "light"
