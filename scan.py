@@ -6,7 +6,7 @@ import time
 import regex as re
 from pymem.exception import PymemError
 from util.typeconversion import convert_to_bytes, Type
-from util.memstructures import Address, Region
+from util.memstructures import Address
 from util.memregions import init_process, process
 
 
@@ -21,6 +21,7 @@ class MemoryScanner:
         self.update_status = update_status_callback
         self.update_results = update_results_callback
         self.update_progress = update_progress_callback
+        self.last_scan_type = None  # Track the last used value type
 
     def get_process_list(self):
         try:
@@ -53,6 +54,7 @@ class MemoryScanner:
         if self.is_scanning or not self.pm:
             self.update_status("Please select a process first")
             return
+        self.last_scan_type = value_type  # Store value type
         threading.Thread(target=self.scan_memory, args=(value, value_type), daemon=True).start()
 
     def scan_memory(self, value, value_type: Type):
@@ -111,6 +113,7 @@ class MemoryScanner:
         if not self.scanned_addresses:
             self.update_status("No previous scan data to refine")
             return
+        self.last_scan_type = value_type  # Store type for decoding
 
         try:
             new_matches = []
@@ -166,7 +169,11 @@ class MemoryScanner:
             del self.scanned_addresses[index]
             self.frozen_indices = {i if i < index else i - 1 for i in self.frozen_indices if i != index}
             self.update_status("Address deleted")
-            self.update_results([f"{hex(addr_obj.address)} -> {addr_obj.value}" for addr_obj in self.scanned_addresses])
+            results = [
+                f"{hex(addr_obj.address)} -> {Type.decode_value(addr_obj.value, self.last_scan_type)}"
+                for addr_obj in self.scanned_addresses
+            ]
+            self.update_results(results)
         else:
             self.update_status("Invalid index for deletion.")
 
@@ -195,12 +202,12 @@ class MemoryScanner:
             for idx, addr_obj in enumerate(self.scanned_addresses):
                 try:
                     if idx in self.frozen_indices:
-
                         self.pm.write_bytes(addr_obj.address, addr_obj.value, len(addr_obj.value))
                     else:
                         new_value = self.pm.read_bytes(addr_obj.address, len(addr_obj.value))
                         addr_obj.value = new_value
-                    results.append(f"{hex(addr_obj.address)} -> {addr_obj.value}")
+                    decoded = Type.decode_value(addr_obj.value, self.last_scan_type)
+                    results.append(f"{hex(addr_obj.address)} -> {decoded}")
                 except PymemError:
                     continue
             self.update_results(results)

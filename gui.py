@@ -142,15 +142,16 @@ class MemScanUI:
             return
 
         index = selected[0]
-        value_type = Type(self.value_type_var.get())
-        self.scanner.edit_address(index, new_value, value_type)
         current_item = self.results_list.get(index)
         address = current_item.split(" -> ")[0]
+        is_frozen = " [Frozen]" in current_item
 
-        if "[Frozen]" in current_item:
-            updated_item = f"{address} -> [Frozen] {new_value}"
-        else:
-            updated_item = f"{address} -> {new_value}"
+        value_type = Type(self.value_type_var.get())
+        self.scanner.edit_address(index, new_value, value_type)
+
+        updated_item = f"{address} -> {new_value}"
+        if is_frozen:
+            updated_item += " [Frozen]"
 
         self.results_list.delete(index)
         self.results_list.insert(index, updated_item)
@@ -192,12 +193,13 @@ class MemScanUI:
 
     def tag_freeze(self, index):
         value = self.results_list.get(index)
-        self.results_list.delete(index)
-        self.results_list.insert(index, f"[Frozen] {value}")
-        self.results_list.itemconfig(index, {'fg': 'blue'})
+        if " [Frozen]" not in value:
+            self.results_list.delete(index)
+            self.results_list.insert(index, f"{value} [Frozen]")
+            self.results_list.itemconfig(index, {'fg': 'blue'})
 
     def tag_unfreeze(self, index):
-        value = self.results_list.get(index).replace("[Frozen] ", "")
+        value = self.results_list.get(index).replace(" [Frozen]", "")
         self.results_list.delete(index)
         self.results_list.insert(index, value)
         self.results_list.itemconfig(index, {'fg': 'black'})
@@ -209,11 +211,13 @@ class MemScanUI:
         yview = self.results_list.yview()
         self.results_list.delete(0, tk.END)
         for i, result in enumerate(results):
+            entry = result
             if i in self.scanner.frozen_indices:
-                self.results_list.insert(tk.END, f"[Frozen] {result}")
+                entry += " [Frozen]"
+                self.results_list.insert(tk.END, entry)
                 self.results_list.itemconfig(tk.END, {'fg': 'blue'})
             else:
-                self.results_list.insert(tk.END, result)
+                self.results_list.insert(tk.END, entry)
         self.results_list.yview_moveto(yview[0])
 
     def update_progress(self, progress):
