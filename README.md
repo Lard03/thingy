@@ -16,5 +16,5 @@ A Python-based memory scanning and modification tool. This application allows yo
 1. Launch the application.  
 2. Select a process to scan.  
 3. Enter the value to search for and start the initial scan.  
-4. Refine the search using the **Next Scan** option.  
+4. Refine the search by changing the value in the process, then scanning for the updated value using the **Next Scan** option.  
 5. Modify, freeze, or unfreeze values from the address list.  
